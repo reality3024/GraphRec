@@ -1,0 +1,3 @@
+我有小調原本的程式碼(為了應用Epinion dataset)
+這個best_model.pt結果是我用toy dataset去跑測試的，到時候會切換成Epinion做訓練
+有這個就可以做接下來的inference
