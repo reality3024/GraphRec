@@ -1,6 +1,6 @@
 這裡是Epinion的資料集轉換方法
 我把資料都分好了，可以跑create_pickle.py把.mat檔轉換成.pickle，如果要改變train/test比例需要從這邊修改
-另外我把資料可視化成excel檔可以查看確認，資料集是從https://www.cse.msu.edu/~tangjili/trust.html來的
+另外我把資料可視化成excel檔可以查看確認，資料集是從https://www.cse.msu.edu/~tangjili/trust.html 來的
 Epinion分類.txt是根據所有產品別做大項分類，不過在原文並沒有使用到這個feature。
 你可以用read_pickle.ipynb來讀取pickle檔看裡面長啥樣子
 
