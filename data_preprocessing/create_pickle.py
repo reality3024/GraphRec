@@ -5,6 +5,7 @@ from collections import defaultdict
 import random
 import os
 from tqdm import tqdm
+import pandas as pd
 
 def create_user_product_map(arr, key_column, value_column):
     """
@@ -92,10 +93,10 @@ def create_rating_list(arr):
         rating_list_map[float(rating)] = rating
     return rating_list_map
 
-def create_training_testing_data(all_ids, ratings_list, train_ratio=0.8):
+def create_training_testing_data(all_ids, ratings_list, train_ratio=0.8, val_ratio=0.1):
     """
-    Create training data from all_ids using ratings_list for rating value mapping.
-    Returns train_u, train_v, train_r lists.
+    Create training, validation and testing data from all_ids using ratings_list for rating value mapping.
+    Returns train_u, train_v, train_r, val_u, val_v, val_r, test_u, test_v, test_r lists.
     """
     # Convert all_ids to appropriate format with explicit type conversion
     user_ids = np.array(all_ids[:, 0], dtype=np.int64)
@@ -112,25 +113,32 @@ def create_training_testing_data(all_ids, ratings_list, train_ratio=0.8):
         rating_value = float(ratings_list[rating_index])
         all_ratings.append((user_id, item_id, rating_value))
     
-    # Shuffle and split into train/test
+    # Shuffle and split into train/val/test
     random.shuffle(all_ratings)
-    split_idx = int(len(all_ratings) * train_ratio)
-    train_data = all_ratings[:split_idx]
-    test_data = all_ratings[split_idx:]
+    train_idx = int(len(all_ratings) * train_ratio)
+    val_idx = int(len(all_ratings) * (train_ratio + val_ratio))
+    
+    train_data = all_ratings[:train_idx]
+    val_data = all_ratings[train_idx:val_idx]
+    test_data = all_ratings[val_idx:]
     
     # Separate into user, item, rating lists
     train_u, train_v, train_r = zip(*train_data)
+    val_u, val_v, val_r = zip(*val_data)
     test_u, test_v, test_r = zip(*test_data)
     
     # Convert to lists
     train_u = list(train_u)
     train_v = list(train_v)
     train_r = list(train_r)
+    val_u = list(val_u)
+    val_v = list(val_v)
+    val_r = list(val_r)
     test_u = list(test_u)
     test_v = list(test_v)
     test_r = list(test_r)
     
-    return train_u, train_v, train_r, test_u, test_v, test_r
+    return train_u, train_v, train_r, val_u, val_v, val_r, test_u, test_v, test_r
 
 def process_dataset(rating_file, trust_file, output_dir, train_ratio=0.8):
     # Load MATLAB files and print available keys
@@ -170,67 +178,51 @@ def process_dataset(rating_file, trust_file, output_dir, train_ratio=0.8):
     history_ur_lists = defaultdict(list)
     history_v_lists = defaultdict(list)
     history_vr_lists = defaultdict(list)
+    history_timestamp_lists = defaultdict(list)
 
     # Create all information from source data
     all_ids = ratings.astype(int)  # Convert ratings to appropriate format
     all_columns = list(range(all_ids.shape[1]))
     # Remove the specified columns(Category, helpfulness, timestamp)
-    keep_columns = [col for col in all_columns if col not in [2,4,5]]
+    keep_columns = [col for col in all_columns if col not in [2,4]]
     # Return array with only the kept columns
     all_ids = all_ids[:, keep_columns]
 
     # Create mappings for users and items
     unique_users = np.unique(all_ids[:, 0])
     unique_items = np.unique(all_ids[:, 1])
+    check_missing_sequence(unique_users)
+    check_missing_sequence(unique_items)
     
-    # Create user ID mapping (1-based to 0-based continuous)
-    user_id_map = {}
-    current_idx = 0
-    for user_id in range(1, max(unique_users) + 1):
-        if user_id in unique_users:
-            user_id_map[user_id] = current_idx
-            current_idx += 1
-    
-    # Create item ID mapping (1-based to 0-based continuous)
-    item_id_map = {}
-    current_idx = 0
-    for item_id in range(1, max(unique_items) + 1):
-        if item_id in unique_items:
-            item_id_map[item_id] = current_idx
-            current_idx += 1
+    # Add missing data
+    missing_data = np.array([
+        [0, 0, 3, 1999999999],
+        [20819, 0, 3, 1999999999],
+        [21354, 0, 3, 1999999999]
+    ])
+    all_ids = np.vstack([all_ids, missing_data])
 
-    # Map the IDs in all_ids to continuous indices
-    mapped_all_ids = np.copy(all_ids)
-    for i in range(len(all_ids)):
-        mapped_all_ids[i, 0] = user_id_map[all_ids[i, 0]]
-        mapped_all_ids[i, 1] = item_id_map[all_ids[i, 1]]
+    # Export all_ids to CSV
+    df = pd.DataFrame(all_ids, columns=['user_id', 'product_id', 'rating', 'timestamp'])
+    csv_output_path = os.path.join(output_dir, 'mapped_data.csv')
+    df.to_csv(csv_output_path, index=False)
+    print(f"Exported data to {csv_output_path}")
 
     # Create rating list
-    ratings_list = create_rating_list(mapped_all_ids)
+    ratings_list = create_rating_list(all_ids)
 
-    # Create training and testing data with mapped IDs
-    train_u, train_v, train_r, test_u, test_v, test_r = create_training_testing_data(mapped_all_ids, ratings_list, train_ratio)
+    # Create training and testing data
+    train_u, train_v, train_r, val_u, val_v, val_r, test_u, test_v, test_r = create_training_testing_data(all_ids, ratings_list, train_ratio)
     
-    # Create history lists with mapped IDs
-    history_u_lists = create_user_product_map(mapped_all_ids, 0, 1)
-    history_ur_lists = create_user_product_map(mapped_all_ids, 0, 2)
-    history_v_lists, history_vr_lists = create_product_user_map(mapped_all_ids, 1, 0)
-    history_vr_lists = create_user_product_map(mapped_all_ids, 1, 2)
+    # Create history lists
+    history_u_lists = create_user_product_map(all_ids, 0, 1)
+    history_ur_lists = create_user_product_map(all_ids, 0, 2)
+    history_v_lists, history_vr_lists = create_product_user_map(all_ids, 1, 0)
+    history_vr_lists = create_user_product_map(all_ids, 1, 2)
+    history_timestamp_lists = create_user_product_map(all_ids, 0, 3)
     
-    # Map trust network IDs
-    mapped_trust = np.copy(trust)
-    for i in range(len(trust)):
-        if trust[i, 0] in user_id_map and trust[i, 1] in user_id_map:
-            mapped_trust[i, 0] = user_id_map[trust[i, 0]]
-            mapped_trust[i, 1] = user_id_map[trust[i, 1]]
-        else:
-            # Remove trust relationships involving missing users
-            mapped_trust[i, 0] = -1
-            mapped_trust[i, 1] = -1
-    
-    # Filter out invalid trust relationships
-    valid_trust = mapped_trust[(mapped_trust[:, 0] != -1) & (mapped_trust[:, 1] != -1)]
-    social_adj_lists = create_social_adj_lists(valid_trust)
+    # Process trust network (no need for mapping since we're using original IDs)
+    social_adj_lists = create_social_adj_lists(trust)
     
     # Save processed data
     processed_data = (
@@ -241,18 +233,22 @@ def process_dataset(rating_file, trust_file, output_dir, train_ratio=0.8):
         train_u,
         train_v,
         train_r,
+        val_u,
+        val_v,
+        val_r,
         test_u,
         test_v,
         test_r,
         social_adj_lists,
-        ratings_list
+        ratings_list,
+        history_timestamp_lists
     )
     
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
     
     dataset_name = 'Epinions'
-    output_file = os.path.join(output_dir, f"dataset_{dataset_name}.pickle")
+    output_file = os.path.join(output_dir, f"dataset_{dataset_name}_train80val10test0.pickle")
     
     with open(output_file, 'wb') as f:
         pickle.dump(processed_data, f)
